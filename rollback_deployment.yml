@@ -1,0 +1,53 @@
+# deploy_with_rollback.yml
+
+- name: Deploy Web Application with Rollback
+  hosts: webservers
+  become: true
+  vars:
+    new_app_files: "/path/to/new/app/files"
+    backup_path: "/path/to/backup/app_files"
+    current_app_files: "/usr/share/nginx/html"
+
+  tasks:
+    - name: Backup existing application files
+      copy:
+        src: "{{ current_app_files }}/"
+        dest: "{{ backup_path }}/"
+        remote_src: yes
+      register: backup_result
+
+    - name: Deploy new application files
+      copy:
+        src: "{{ new_app_files }}/"
+        dest: "{{ current_app_files }}/"
+      register: deploy_result
+      ignore_errors: yes  # Prevent playbook from halting on failure
+
+    - name: Validate deployment
+      command: "curl -f http://localhost"  # Example validation command
+      register: validate_result
+      when: deploy_result is succeeded
+
+    # Rescue block for rollbacks
+    rescue:
+      - name: Rollback to previous application files
+        copy:
+          src: "{{ backup_path }}/"
+          dest: "{{ current_app_files }}/"
+          remote_src: yes
+
+      - name: Notify rollback success
+        debug:
+          msg: "Deployment failed. Rolled back to previous version."
+    
+    - name: Clean up backup files
+      file:
+        path: "{{ backup_path }}"
+        state: absent
+      when: validate_result is failed
+
+  always:
+    - name: Restart Nginx
+      service:
+        name: nginx
+        state: restarted
